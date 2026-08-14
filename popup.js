@@ -8,6 +8,8 @@ const DEFAULTS = {
   model: 'gemini-2.5-flash',
   temperature: 0.4,
   extraInstruction: '',
+  showButton: true,
+  blocklist: '',
 };
 
 const $ = (id) => document.getElementById(id);
@@ -17,6 +19,8 @@ const els = {
   temperature: $('temperature'),
   tempOut: $('tempOut'),
   extra: $('extraInstruction'),
+  showButton: $('showButton'),
+  blocklist: $('blocklist'),
   save: $('save'),
   test: $('test'),
   toggle: $('toggleKey'),
@@ -37,6 +41,8 @@ function setStatus(msg, kind = '') {
   els.temperature.value = cfg.temperature;
   els.tempOut.value = Number(cfg.temperature).toFixed(1);
   els.extra.value = cfg.extraInstruction;
+  els.showButton.checked = cfg.showButton;
+  els.blocklist.value = cfg.blocklist;
 
   // Model đã lưu có thể không nằm trong danh sách mặc định -> thêm động
   if (![...els.model.options].some((o) => o.value === cfg.model)) {
@@ -71,7 +77,17 @@ async function save({ silent = false } = {}) {
     model: els.model.value,
     temperature: parseFloat(els.temperature.value),
     extraInstruction: els.extra.value.trim(),
+    showButton: els.showButton.checked,
+    // Chuẩn hoá: bỏ scheme/đường dẫn, hạ chữ thường — content.js so khớp thuần hostname
+    blocklist: els.blocklist.value
+      .split(/[\n,]+/)
+      .map((s) => s.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''))
+      .filter(Boolean)
+      .join('\n'),
   });
+
+  // Hiển thị lại bản đã chuẩn hoá để người dùng thấy đúng thứ sẽ được áp dụng
+  els.blocklist.value = (await chrome.storage.local.get('blocklist')).blocklist;
 
   if (!silent && !els.status.textContent.startsWith('⚠')) {
     setStatus('✓ Đã lưu cấu hình.', 'ok');

@@ -54,6 +54,21 @@
         placeholder="VD: Luôn viết prompt bằng tiếng Anh. Luôn thêm mục 'Ràng buộc'."></textarea>
     </label>
 
+    <div class="field field--check">
+      <input id="showButton" type="checkbox" />
+      <label for="showButton">
+        Hiện nút ✨ khi focus vào ô nhập liệu
+        <span class="field__hint">Tắt đi thì chỉ dùng phím tắt và menu chuột phải — trang web sẽ hoàn toàn sạch.</span>
+      </label>
+    </div>
+
+    <label class="field">
+      <span class="field__label">Tắt trên các tên miền (mỗi dòng một tên)</span>
+      <textarea id="blocklist" rows="3" spellcheck="false"
+        placeholder="mail.google.com&#10;facebook.com&#10;docs.google.com"></textarea>
+      <span class="field__hint">Áp dụng cho cả tên miền con. Có hiệu lực ngay, không cần tải lại trang.</span>
+    </label>
+
     <div class="actions">
       <button id="save" class="btn-primary" type="button">Lưu cấu hình</button>
       <button id="test" class="btn-secondary" type="button">Kiểm tra kết nối</button>
@@ -63,8 +78,10 @@
   </main>
 
   <footer class="foot">
-    Dùng trên <b>aistudio.google.com</b>: bấm nút <b>✨ Rewrite</b> cạnh nút Run,
-    hoặc phím tắt <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd>.
+    Dùng ở <b>mọi trang web</b> theo 3 cách:
+    bấm nút <b>✨</b> hiện lên khi focus vào ô nhập &middot;
+    phím tắt <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd> &middot;
+    chuột phải → <b>Viết lại</b>.
   </footer>
 
   <script src="popup.js"></script>

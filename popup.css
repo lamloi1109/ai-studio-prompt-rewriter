@@ -51,6 +51,29 @@ body {
 
 .field__row { display: flex; gap: 6px; }
 
+/* Hàng checkbox: ô tick canh theo dòng chữ đầu tiên, hint xuống dòng bên dưới */
+.field--check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.field--check input[type="checkbox"] {
+  width: auto;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.field--check label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.field--check .field__hint { font-weight: 400; }
+
 input[type="password"],
 input[type="text"],
 select,

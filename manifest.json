@@ -1,18 +1,19 @@
 {
   "manifest_version": 3,
-  "name": "AI Studio Prompt Rewriter",
-  "version": "1.0.0",
-  "description": "Viết lại / tối ưu prompt ngay trong Google AI Studio bằng Gemini API.",
+  "name": "Prompt Rewriter — Gemini",
+  "version": "2.0.0",
+  "description": "Viết lại / tối ưu prompt trên MỌI trang web (AI Studio, ChatGPT, Claude, Gemini…) bằng Gemini API.",
 
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "contextMenus",
+    "clipboardWrite"
   ],
 
   "host_permissions": [
-    "https://aistudio.google.com/*",
-    "https://generativelanguage.googleapis.com/*"
+    "<all_urls>"
   ],
 
   "background": {
@@ -22,7 +23,7 @@
 
   "content_scripts": [
     {
-      "matches": ["https://aistudio.google.com/*"],
+      "matches": ["<all_urls>"],
       "js": ["content.js"],
       "css": ["content.css"],
       "run_at": "document_idle",
@@ -32,7 +33,7 @@
 
   "action": {
     "default_popup": "popup.html",
-    "default_title": "AI Studio Prompt Rewriter",
+    "default_title": "Prompt Rewriter",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -57,7 +58,7 @@
         "default": "Ctrl+Shift+U",
         "mac": "Command+Shift+U"
       },
-      "description": "Viết lại prompt đang có trong ô nhập liệu"
+      "description": "Viết lại prompt trong ô nhập liệu đang focus"
     }
   }
 }

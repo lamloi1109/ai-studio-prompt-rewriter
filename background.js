@@ -231,25 +231,82 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 // ---------------------------------------------------------------------------
-// Phím tắt: chuyển tiếp xuống content script của tab đang hoạt động
+// Gửi lệnh xuống content script, tự inject nếu tab mở từ trước khi cài extension
 // ---------------------------------------------------------------------------
+
+/** Các scheme mà content script không thể chạy — bỏ qua sớm để khỏi log lỗi. */
+const BLOCKED_SCHEME = /^(chrome|edge|about|devtools|view-source|chrome-extension|moz-extension):/i;
+
+function canInject(url) {
+  return !!url && !BLOCKED_SCHEME.test(url) && !url.startsWith('https://chromewebstore.google.com/');
+}
+
+async function sendToTab(tabId, payload) {
+  try {
+    await chrome.tabs.sendMessage(tabId, payload);
+  } catch {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+    await chrome.scripting.insertCSS({ target: { tabId }, files: ['content.css'] });
+    await chrome.tabs.sendMessage(tabId, payload);
+  }
+}
+
+// Phím tắt — hoạt động trên mọi trang, không còn giới hạn ở AI Studio
 chrome.commands.onCommand.addListener(async (command) => {
   if (command !== 'rewrite-prompt') return;
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || !tab.url?.startsWith('https://aistudio.google.com/')) return;
+  if (!tab?.id || !canInject(tab.url)) return;
 
-  try {
-    await chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_REWRITE' });
-  } catch {
-    // Content script chưa sẵn sàng (tab mở từ trước khi cài extension)
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
-    await chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_REWRITE' });
+  await sendToTab(tab.id, { type: 'TRIGGER_REWRITE' });
+});
+
+// ---------------------------------------------------------------------------
+// Menu chuột phải — cách dùng nhanh nhất trên các trang không có nút
+// ---------------------------------------------------------------------------
+
+const MENU_FIELD = 'rewrite-field';
+const MENU_SELECTION = 'rewrite-selection';
+
+function buildMenus() {
+  // Service worker bị kill/hồi sinh liên tục; removeAll trước để tránh
+  // lỗi "duplicate id" khi worker khởi động lại.
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: MENU_FIELD,
+      title: '✨ Viết lại prompt trong ô này',
+      contexts: ['editable'],
+    });
+    chrome.contextMenus.create({
+      id: MENU_SELECTION,
+      title: '✨ Viết lại đoạn đang chọn',
+      contexts: ['selection'],
+    });
+  });
+}
+
+chrome.runtime.onStartup.addListener(buildMenus);
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (!tab?.id || !canInject(tab.url)) return;
+
+  if (info.menuItemId === MENU_FIELD) {
+    // Trong ô nhập: nếu có bôi đen thì chỉ viết lại phần đó, không thì cả ô
+    await sendToTab(tab.id, { type: 'TRIGGER_REWRITE', selectionOnly: !!info.selectionText });
+  } else if (info.menuItemId === MENU_SELECTION) {
+    await sendToTab(tab.id, {
+      type: 'TRIGGER_REWRITE',
+      selectionOnly: true,
+      selectionText: info.selectionText || '',
+    });
   }
 });
 
-// Mở popup cấu hình ngay sau khi cài lần đầu
+// ---------------------------------------------------------------------------
+// Cài đặt lần đầu
+// ---------------------------------------------------------------------------
 chrome.runtime.onInstalled.addListener(async ({ reason }) => {
+  buildMenus();
   if (reason === 'install') {
     const { apiKey } = await chrome.storage.local.get('apiKey');
     if (!apiKey) chrome.runtime.openOptionsPage();

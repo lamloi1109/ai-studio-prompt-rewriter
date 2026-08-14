@@ -1,73 +1,172 @@
 /**
- * content.js — chạy trên https://aistudio.google.com/*
+ * content.js — chạy trên MỌI trang web.
  *
- * Trách nhiệm:
- *  1. Tìm ô nhập prompt của AI Studio (SPA Angular, DOM đổi liên tục).
- *  2. Chèn nút "✨ Rewrite" cạnh nút Run, tự gắn lại khi Angular render lại DOM.
- *  3. Đọc prompt thô -> nhờ background gọi Gemini -> ghi kết quả trở lại ô nhập.
- *  4. Hiển thị toast trạng thái: đang gọi / thiếu key / lỗi mạng / quota, kèm Hoàn tác.
+ * Triết lý thiết kế: không treo nút cố định gây vướng trang. Nút chỉ xuất hiện
+ * khi người dùng thực sự focus vào một ô nhập liệu, và bám theo góc ô đó.
+ * Riêng các site đã biết (AI Studio, ChatGPT, Claude…) thì gắn nút dạng pill
+ * ngay cạnh nút Send/Run cho tự nhiên.
  *
- * Lưu ý: KHÔNG fetch trực tiếp ở đây. Content script mang origin của trang
- * aistudio.google.com nên request tới generativelanguage.googleapis.com sẽ bị
- * CORS chặn; toàn bộ lời gọi API được uỷ quyền cho service worker.
+ * KHÔNG fetch API ở đây: content script mang origin của trang chủ nhà nên sẽ bị
+ * CORS chặn. Toàn bộ lời gọi Gemini uỷ quyền cho service worker.
  */
 
 (() => {
   'use strict';
 
-  // Tránh chạy 2 lần khi background inject lại bằng chrome.scripting
-  if (window.__aiStudioRewriterLoaded) return;
-  window.__aiStudioRewriterLoaded = true;
+  if (window.__promptRewriterLoaded) return;   // background có thể inject lại
+  window.__promptRewriterLoaded = true;
 
   const BTN_ID = 'ps-rewrite-btn';
   const TOAST_ID = 'ps-rewrite-toast';
 
-  // -------------------------------------------------------------------------
-  // 1. TÌM Ô NHẬP LIỆU
-  // -------------------------------------------------------------------------
+  // =========================================================================
+  // 0. CẤU HÌNH RUNTIME
+  // =========================================================================
 
-  /** Selector ưu tiên theo cấu trúc thật của AI Studio, xếp từ cụ thể -> tổng quát. */
-  const INPUT_SELECTORS = [
-    'ms-prompt-input-wrapper textarea',
-    'ms-autosize-textarea textarea',
-    'ms-chunk-editor textarea',
-    'textarea[aria-label*="prompt" i]',
-    'textarea[placeholder*="prompt" i]',
-    'textarea[aria-label*="Type something" i]',
-    'ms-prompt-input-wrapper [contenteditable="true"]',
-    'textarea',
-    '[contenteditable="true"][role="textbox"]',
+  let settings = { showButton: true, blocklist: [] };
+  let disabledHere = false;
+
+  function hostMatches(pattern, host) {
+    const p = pattern.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    if (!p) return false;
+    return host === p || host.endsWith('.' + p);
+  }
+
+  async function loadSettings() {
+    const s = await chrome.storage.local.get({ showButton: true, blocklist: '' });
+    settings.showButton = s.showButton;
+    settings.blocklist = String(s.blocklist || '').split(/[\n,]+/).filter(Boolean);
+    disabledHere = settings.blocklist.some((p) => hostMatches(p, location.hostname));
+    if (disabledHere) teardown();
+  }
+
+  // Đổi cấu hình trong popup có hiệu lực ngay, không cần F5
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    if ('showButton' in changes || 'blocklist' in changes) loadSettings().then(scheduleMount);
+  });
+
+  // =========================================================================
+  // 1. SITE PROFILES — selector riêng cho các trang chat AI phổ biến
+  // =========================================================================
+
+  const SITE_PROFILES = [
+    {
+      name: 'aistudio',
+      host: /(^|\.)aistudio\.google\.com$/,
+      input: ['ms-prompt-input-wrapper textarea', 'ms-autosize-textarea textarea', 'ms-chunk-editor textarea'],
+      anchor: ['run-button button', 'button[aria-label="Run"]', 'button.run-button'],
+    },
+    {
+      name: 'chatgpt',
+      host: /(^|\.)chatgpt\.com$|(^|\.)openai\.com$/,
+      input: ['#prompt-textarea', 'div.ProseMirror[contenteditable="true"]', 'textarea[data-id]'],
+      anchor: ['button[data-testid="send-button"]', 'button[aria-label*="Send" i]'],
+    },
+    {
+      name: 'claude',
+      host: /(^|\.)claude\.ai$/,
+      input: ['div[contenteditable="true"].ProseMirror', 'div[contenteditable="true"]'],
+      anchor: ['button[aria-label*="Send" i]'],
+    },
+    {
+      name: 'gemini',
+      host: /(^|\.)gemini\.google\.com$/,
+      input: ['rich-textarea div.ql-editor', 'div.ql-editor[contenteditable="true"]'],
+      anchor: ['button.send-button', 'button[aria-label*="Send" i]'],
+    },
+    {
+      name: 'perplexity',
+      host: /(^|\.)perplexity\.ai$/,
+      input: ['textarea[placeholder]', 'div[contenteditable="true"]'],
+      anchor: ['button[aria-label*="Submit" i]'],
+    },
+    {
+      name: 'grok',
+      host: /(^|\.)grok\.com$|(^|\.)x\.com$/,
+      input: ['textarea', 'div[contenteditable="true"]'],
+      anchor: ['button[aria-label*="Submit" i]', 'button[data-testid="tweetButtonInline"]'],
+    },
   ];
 
-  /** Phần tử có đang hiển thị & đủ lớn để là ô nhập chính không? */
-  function isUsable(el) {
-    if (!el || !el.isConnected || el.disabled || el.readOnly) return false;
+  const PROFILE = SITE_PROFILES.find((p) => p.host.test(location.hostname)) || { name: 'generic' };
+
+  /** Fallback dùng cho mọi trang không có profile riêng. */
+  const GENERIC_INPUT = [
+    'textarea:not([readonly]):not([disabled])',
+    'div[contenteditable="true"][role="textbox"]',
+    'div[contenteditable="true"]',
+    'input[type="text"]',
+    'input[type="search"]',
+    'input:not([type])',
+  ];
+
+  // =========================================================================
+  // 2. NHẬN DIỆN Ô NHẬP LIỆU
+  // =========================================================================
+
+  function isEditable(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.isContentEditable) return true;
+    if (el.tagName === 'TEXTAREA') return !el.disabled && !el.readOnly;
+    if (el.tagName === 'INPUT') {
+      // Loại trừ password/số/checkbox… — viết lại prompt ở đó là vô nghĩa
+      const t = (el.type || 'text').toLowerCase();
+      return ['text', 'search', 'url', 'email'].includes(t) && !el.disabled && !el.readOnly;
+    }
+    return false;
+  }
+
+  function isVisible(el) {
+    if (!el || !el.isConnected) return false;
     const r = el.getBoundingClientRect();
-    if (r.width < 80 || r.height < 16) return false;
+    if (r.width < 60 || r.height < 14) return false;
     const cs = getComputedStyle(el);
     return cs.display !== 'none' && cs.visibility !== 'hidden' && cs.opacity !== '0';
   }
 
-  /** Ô nhập được người dùng focus gần nhất — ưu tiên cao nhất khi bấm phím tắt. */
-  let lastFocused = null;
-  document.addEventListener(
-    'focusin',
-    (e) => {
-      const t = e.target;
-      if (t && (t.tagName === 'TEXTAREA' || t.isContentEditable)) lastFocused = t;
-    },
-    true
-  );
+  /** Ô nhập được focus gần nhất — nguồn chân lý chính khi dùng ở trang lạ. */
+  let activeInput = null;
 
+  document.addEventListener('focusin', (e) => {
+    if (disabledHere) return;
+    const el = e.target;
+    if (isEditable(el) && isVisible(el)) {
+      activeInput = el;
+      scheduleMount();
+    }
+  }, true);
+
+  document.addEventListener('focusout', () => {
+    if (disabledHere) return;
+    // Trễ nhẹ: click vào nút của ta cũng sinh focusout, không được ẩn vội
+    setTimeout(() => {
+      const ae = document.activeElement;
+      if (isEditable(ae)) return;
+      if (ae?.id === BTN_ID) return;
+      if (!busy) hideFloating();
+    }, 180);
+  }, true);
+
+  /**
+   * Tìm ô nhập để viết lại, theo thứ tự ưu tiên:
+   *   1. Ô đang/vừa focus (đúng ý người dùng nhất)
+   *   2. Selector của site profile
+   *   3. Selector tổng quát — lấy ô hiển thị lớn nhất
+   */
   function findInput() {
-    if (isUsable(lastFocused)) return lastFocused;
+    if (isEditable(activeInput) && isVisible(activeInput)) return activeInput;
 
-    for (const sel of INPUT_SELECTORS) {
-      const found = [...document.querySelectorAll(sel)].filter(isUsable);
-      if (!found.length) continue;
-      // Nhiều textarea cùng tồn tại (system instruction, chat...) -> lấy cái lớn nhất
-      found.sort((a, b) => area(b) - area(a));
-      return found[0];
+    const lists = [PROFILE.input || [], GENERIC_INPUT];
+    for (const list of lists) {
+      for (const sel of list) {
+        let nodes;
+        try { nodes = [...document.querySelectorAll(sel)]; } catch { continue; }
+        const found = nodes.filter((el) => isEditable(el) && isVisible(el));
+        if (!found.length) continue;
+        found.sort((a, b) => area(b) - area(a));   // ô lớn nhất thường là ô chat chính
+        return found[0];
+      }
     }
     return null;
   }
@@ -77,50 +176,92 @@
     return r.width * r.height;
   };
 
-  // -------------------------------------------------------------------------
-  // 2. ĐỌC / GHI GIÁ TRỊ (tương thích Angular)
-  // -------------------------------------------------------------------------
+  // =========================================================================
+  // 3. ĐỌC / GHI GIÁ TRỊ
+  // =========================================================================
 
   function readValue(el) {
     return el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' ? el.value : el.innerText;
   }
 
+  /** Đoạn text đang được bôi đen bên trong ô nhập (nếu có). */
+  function readSelection(el) {
+    if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+      const { selectionStart: s, selectionEnd: e } = el;
+      return s != null && e != null && e > s ? el.value.slice(s, e) : '';
+    }
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return '';
+    return el.contains(sel.anchorNode) ? sel.toString() : '';
+  }
+
   /**
-   * Angular/Material bind qua property setter riêng. Gán el.value = x trực tiếp
-   * sẽ KHÔNG kích hoạt ValueAccessor => trang tưởng ô vẫn rỗng, bấm Run mất chữ.
-   * Cách đúng: gọi native setter của prototype rồi phát sự kiện 'input' bubbling.
+   * React/Vue/Angular đều bind qua property setter riêng của prototype.
+   * Gán el.value = x trực tiếp KHÔNG kích hoạt state của framework => trang
+   * tưởng ô vẫn rỗng và nút Send vẫn disabled. Phải gọi native setter rồi
+   * phát 'input' bubbling để framework nghe thấy.
    */
-  function writeValue(el, text) {
+  function writeValue(el, text, { replaceSelection = false } = {}) {
     if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
       const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-      setter ? setter.call(el, text) : (el.value = text);
+
+      let next = text;
+      let caret = text.length;
+      if (replaceSelection && el.selectionEnd > el.selectionStart) {
+        const s = el.selectionStart;
+        next = el.value.slice(0, s) + text + el.value.slice(el.selectionEnd);
+        caret = s + text.length;
+      }
+
+      setter ? setter.call(el, next) : (el.value = next);
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
-      el.style.height = 'auto'; // ép autosize tính lại chiều cao
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-    } else {
-      // contenteditable: dùng execCommand để giữ nguyên undo stack của trình duyệt
+
       el.focus();
-      const sel = window.getSelection();
+      try { el.setSelectionRange(caret, caret); } catch { /* input type=email không cho */ }
+
+      // Ép các textarea autosize tính lại chiều cao
+      el.style.height = 'auto';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
+
+    // contenteditable (ProseMirror của ChatGPT/Claude, Quill của Gemini…):
+    // execCommand('insertText') là cách duy nhất giữ được undo stack và
+    // khiến các rich editor cập nhật state nội bộ đúng cách.
+    el.focus();
+    const sel = window.getSelection();
+
+    if (!replaceSelection || sel.isCollapsed || !el.contains(sel.anchorNode)) {
       const range = document.createRange();
       range.selectNodeContents(el);
       sel.removeAllRanges();
       sel.addRange(range);
-      if (!document.execCommand('insertText', false, text)) {
-        el.textContent = text;
-        el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text }));
-      }
     }
 
-    // Đưa con trỏ về cuối cho người dùng gõ tiếp
-    el.focus();
-    if (el.setSelectionRange) el.setSelectionRange(text.length, text.length);
+    if (!document.execCommand('insertText', false, text)) {
+      el.textContent = text;
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text }));
+    }
   }
 
-  // -------------------------------------------------------------------------
-  // 3. TOAST TRẠNG THÁI
-  // -------------------------------------------------------------------------
+  /** Dự phòng cho vùng không sửa được (bài báo, comment người khác…). */
+  function copyToClipboard(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { /* bị chặn */ }
+    ta.remove();
+    return ok;
+  }
+
+  // =========================================================================
+  // 4. TOAST
+  // =========================================================================
 
   let toastTimer = null;
 
@@ -148,10 +289,8 @@
       const undo = document.createElement('button');
       undo.className = 'ps-toast__undo';
       undo.textContent = 'Hoàn tác';
-      undo.addEventListener('click', () => {
-        onUndo();
-        hideToast();
-      });
+      undo.addEventListener('mousedown', (e) => e.preventDefault());
+      undo.addEventListener('click', () => { onUndo(); hideToast(); });
       box.appendChild(undo);
     }
 
@@ -164,40 +303,74 @@
     document.getElementById(TOAST_ID)?.classList.remove('ps-toast--show');
   }
 
-  // -------------------------------------------------------------------------
-  // 4. LUỒNG CHÍNH
-  // -------------------------------------------------------------------------
+  // =========================================================================
+  // 5. LUỒNG CHÍNH
+  // =========================================================================
 
   let busy = false;
 
-  async function rewrite() {
+  /**
+   * @param {object}  opts
+   * @param {boolean} opts.selectionOnly  Chỉ viết lại phần đang bôi đen
+   * @param {string}  opts.fallbackText   Text từ context menu khi không có ô nhập
+   */
+  async function rewrite({ selectionOnly = false, fallbackText = '' } = {}) {
     if (busy) return;
 
     const input = findInput();
+
+    // Không có ô nhập nào (bôi đen text trên trang tĩnh) -> trả kết quả qua clipboard
     if (!input) {
-      toast('Không tìm thấy ô nhập prompt. Hãy click vào ô chat rồi thử lại.', 'error');
-      return;
+      const text = (fallbackText || String(window.getSelection() || '')).trim();
+      if (!text) {
+        toast('Hãy click vào ô nhập liệu hoặc bôi đen đoạn text trước.', 'error');
+        return;
+      }
+      return runRemote(text, (out, truncated) => {
+        const copied = copyToClipboard(out);
+        toast(
+          (copied ? 'Đã viết lại và copy vào clipboard (Ctrl+V để dán).' : 'Đã viết lại nhưng không copy được.') +
+            (truncated ? ' Kết quả bị cắt do giới hạn token.' : ''),
+          copied ? 'success' : 'error',
+          { duration: 6000 }
+        );
+      });
     }
 
-    const original = readValue(input).trim();
-    if (!original) {
-      toast('Ô nhập đang trống — hãy gõ prompt thô trước.', 'error');
-      return;
-    }
-    if (original.length > 20000) {
-      toast('Prompt quá dài (>20.000 ký tự).', 'error');
-      return;
-    }
+    const selected = readSelection(input);
+    const useSelection = selectionOnly && !!selected;
+    const source = (useSelection ? selected : readValue(input)).trim();
 
+    if (!source) { toast('Ô nhập đang trống — hãy gõ prompt thô trước.', 'error'); return; }
+    if (source.length > 20000) { toast('Nội dung quá dài (>20.000 ký tự).', 'error'); return; }
+
+    const snapshot = readValue(input);   // để hoàn tác
+
+    return runRemote(source, (out, truncated) => {
+      writeValue(input, out, { replaceSelection: useSelection });
+      const msg = (useSelection ? 'Đã viết lại phần bôi đen.' : 'Đã viết lại prompt.') +
+        (truncated ? ' Kết quả bị cắt do giới hạn token.' : '');
+      toast(msg, 'success', {
+        duration: 8000,
+        onUndo: () => {
+          writeValue(input, snapshot);
+          toast('Đã khôi phục nội dung gốc.', 'info', { duration: 2500 });
+        },
+      });
+    });
+  }
+
+  /** Gọi background, xử lý trạng thái nút + lỗi. onDone chỉ chạy khi thành công. */
+  async function runRemote(text, onDone) {
     busy = true;
     setButtonState('loading');
-    toast('Đang viết lại prompt…', 'loading', { duration: 0 });
+    toast('Đang viết lại…', 'loading', { duration: 0 });
 
     let res;
     try {
-      res = await chrome.runtime.sendMessage({ type: 'REWRITE', text: original });
+      res = await chrome.runtime.sendMessage({ type: 'REWRITE', text });
     } catch {
-      // Xảy ra khi extension vừa được reload -> context của content script cũ đã chết
+      // Extension vừa reload -> context của content script cũ đã chết
       res = { ok: false, error: 'Tiện ích vừa được tải lại. Hãy F5 trang rồi thử lại.' };
     } finally {
       busy = false;
@@ -208,42 +381,22 @@
       toast(res?.error || 'Lỗi không xác định.', 'error', { duration: 7000 });
       return;
     }
-
-    writeValue(input, res.text);
-
-    const note = res.truncated ? 'Đã viết lại (bị cắt do đạt giới hạn token).' : 'Đã viết lại prompt.';
-    toast(note, 'success', {
-      duration: 8000,
-      onUndo: () => {
-        writeValue(input, original);
-        toast('Đã khôi phục prompt gốc.', 'info', { duration: 2500 });
-      },
-    });
+    onDone(res.text, !!res.truncated);
   }
 
-  // -------------------------------------------------------------------------
-  // 5. CHÈN NÚT & GIỮ NÚT SỐNG SÓT QUA CÁC LẦN RE-RENDER
-  // -------------------------------------------------------------------------
-
-  /** Tìm thanh công cụ chứa nút Run để đặt nút cạnh bên. */
-  function findAnchor() {
-    const runBtn =
-      document.querySelector('run-button button') ||
-      document.querySelector('button[aria-label="Run"]') ||
-      document.querySelector('button.run-button') ||
-      [...document.querySelectorAll('button')].find(
-        (b) => b.textContent.trim().toLowerCase() === 'run' && isUsable(b)
-      );
-    return runBtn?.parentElement || null;
-  }
+  // =========================================================================
+  // 6. NÚT — 2 chế độ: inline (site đã biết) và floating (bám ô đang focus)
+  // =========================================================================
 
   function buildButton() {
     const btn = document.createElement('button');
     btn.id = BTN_ID;
     btn.type = 'button';
-    btn.className = 'ps-rewrite-btn';
+    btn.setAttribute('aria-label', 'Viết lại prompt bằng Gemini');
     btn.title = 'Viết lại prompt bằng Gemini (Ctrl+Shift+U)';
     btn.innerHTML = '<span class="ps-icon">✨</span><span class="ps-label">Rewrite</span>';
+    // Giữ con trỏ ở lại trong ô nhập khi bấm nút
+    btn.addEventListener('mousedown', (e) => e.preventDefault());
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -252,58 +405,105 @@
     return btn;
   }
 
+  const getButton = () => document.getElementById(BTN_ID);
+
   function setButtonState(state) {
-    const btn = document.getElementById(BTN_ID);
+    const btn = getButton();
     if (!btn) return;
-    btn.classList.toggle('ps-rewrite-btn--busy', state === 'loading');
-    btn.disabled = state === 'loading';
-    btn.querySelector('.ps-label').textContent = state === 'loading' ? 'Đang xử lý…' : 'Rewrite';
+    const loading = state === 'loading';
+    btn.classList.toggle('ps-rewrite-btn--busy', loading);
+    btn.disabled = loading;
+    btn.querySelector('.ps-label').textContent = loading ? 'Đang xử lý…' : 'Rewrite';
   }
 
-  function mountButton() {
-    const existing = document.getElementById(BTN_ID);
-    const anchor = findAnchor();
-
-    // Nút đã nằm đúng chỗ -> không làm gì (tránh nhấp nháy mỗi lần DOM đổi)
-    if (existing && anchor && existing.parentElement === anchor) return;
-    if (existing && !anchor && existing.classList.contains('ps-rewrite-btn--floating')) return;
-
-    const btn = existing || buildButton();
-
-    if (anchor) {
-      btn.classList.remove('ps-rewrite-btn--floating');
-      anchor.insertBefore(btn, anchor.firstChild);
-    } else {
-      // Fallback: AI Studio đổi layout / trang chưa render xong -> nút nổi góc phải
-      btn.classList.add('ps-rewrite-btn--floating');
-      document.body.appendChild(btn);
+  function findAnchor() {
+    for (const sel of PROFILE.anchor || []) {
+      const el = document.querySelector(sel);
+      if (el && isVisible(el) && el.parentElement) return el.parentElement;
     }
+    return null;
   }
 
-  // MutationObserver + debounce: Angular re-render rất dày, không thể xử lý từng mutation
+  /** Đặt nút nổi ngay trên góc phải của ô đang focus, kẹp trong viewport. */
+  function positionFloating(btn, target) {
+    const r = target.getBoundingClientRect();
+    const w = btn.offsetWidth || 30;
+    const h = btn.offsetHeight || 30;
+
+    let top = r.top - h - 6;
+    if (top < 4) top = Math.min(r.bottom + 6, innerHeight - h - 4);   // không đủ chỗ phía trên
+
+    const left = Math.max(4, Math.min(r.right - w, innerWidth - w - 4));
+
+    btn.style.top = `${Math.round(top)}px`;
+    btn.style.left = `${Math.round(left)}px`;
+  }
+
+  function hideFloating() {
+    const btn = getButton();
+    if (btn?.classList.contains('ps-rewrite-btn--floating')) btn.remove();
+  }
+
+  function teardown() {
+    getButton()?.remove();
+    hideToast();
+  }
+
+  function mount() {
+    if (disabledHere || !settings.showButton) { teardown(); return; }
+
+    const anchor = findAnchor();
+    let btn = getButton();
+
+    // --- Chế độ inline: gắn cạnh nút Send/Run của site đã biết ---
+    if (anchor) {
+      if (btn && btn.parentElement === anchor && !btn.classList.contains('ps-rewrite-btn--floating')) return;
+      btn = btn || buildButton();
+      btn.classList.remove('ps-rewrite-btn--floating');
+      btn.style.top = btn.style.left = '';
+      anchor.insertBefore(btn, anchor.firstChild);
+      return;
+    }
+
+    // --- Chế độ floating: chỉ hiện khi có ô nhập đang focus ---
+    const target = isEditable(activeInput) && isVisible(activeInput) ? activeInput : null;
+    if (!target) { hideFloating(); return; }
+
+    btn = btn || buildButton();
+    btn.classList.add('ps-rewrite-btn--floating');
+    if (btn.parentElement !== document.body) document.body.appendChild(btn);
+    positionFloating(btn, target);
+  }
+
+  // Debounce bằng rAF: SPA re-render rất dày, không thể xử lý từng mutation
   let raf = 0;
-  const observer = new MutationObserver(() => {
+  function scheduleMount() {
     if (raf) return;
-    raf = requestAnimationFrame(() => {
-      raf = 0;
-      mountButton();
-    });
-  });
+    raf = requestAnimationFrame(() => { raf = 0; mount(); });
+  }
 
-  observer.observe(document.body, { childList: true, subtree: true });
-  mountButton();
+  new MutationObserver(scheduleMount).observe(document.documentElement, { childList: true, subtree: true });
 
-  // SPA đổi route mà không reload trang -> gắn lại nút
-  window.addEventListener('popstate', () => setTimeout(mountButton, 500));
+  // Nút nổi phải bám theo ô khi cuộn / đổi kích thước cửa sổ
+  addEventListener('scroll', scheduleMount, { passive: true, capture: true });
+  addEventListener('resize', scheduleMount, { passive: true });
+  addEventListener('popstate', () => setTimeout(scheduleMount, 500));   // SPA đổi route
 
-  // -------------------------------------------------------------------------
-  // 6. NHẬN LỆNH TỪ PHÍM TẮT (chrome.commands -> background -> đây)
-  // -------------------------------------------------------------------------
+  // =========================================================================
+  // 7. LỆNH TỪ PHÍM TẮT / MENU CHUỘT PHẢI
+  // =========================================================================
+
   chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
     if (msg?.type === 'TRIGGER_REWRITE') {
-      rewrite();
+      if (disabledHere) {
+        toast('Tiện ích đang bị tắt trên tên miền này (xem blocklist trong popup).', 'error');
+      } else {
+        rewrite({ selectionOnly: !!msg.selectionOnly, fallbackText: msg.selectionText || '' });
+      }
       sendResponse({ ok: true });
     }
     return false;
   });
+
+  loadSettings().then(scheduleMount);
 })();
