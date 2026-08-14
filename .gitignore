@@ -1,0 +1,24 @@
+# Khoá ký private của Chrome khi đóng gói .crx — TUYỆT ĐỐI không commit
+*.pem
+
+# Gói build
+*.crx
+*.zip
+
+# Node (nếu sau này thêm build tool)
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# File cấu hình cục bộ có thể chứa key
+*.local
+.env
+.env.*
+secrets.json

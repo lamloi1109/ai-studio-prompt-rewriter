@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI Studio Prompt Rewriter</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="head">
+    <span class="head__icon">✨</span>
+    <div>
+      <h1>Prompt Rewriter</h1>
+      <p class="head__sub">Tối ưu prompt trong Google AI Studio</p>
+    </div>
+  </header>
+
+  <main>
+    <label class="field">
+      <span class="field__label">Gemini API Key</span>
+      <div class="field__row">
+        <input id="apiKey" type="password" placeholder="AQ.Ab8... hoặc AIza..." autocomplete="off" spellcheck="false" />
+        <button id="toggleKey" class="btn-ghost" type="button" title="Hiện/ẩn key">👁</button>
+      </div>
+      <span class="field__hint">
+        Lấy key miễn phí tại
+        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
+        Key chỉ được lưu trong <code>chrome.storage.local</code> trên máy bạn.
+      </span>
+    </label>
+
+    <label class="field">
+      <span class="field__label">Model</span>
+      <select id="model">
+        <option value="gemini-2.5-flash">gemini-2.5-flash — cân bằng, khuyên dùng</option>
+        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite — nhanh & quota cao nhất</option>
+        <option value="gemini-2.0-flash">gemini-2.0-flash — ổn định</option>
+        <option value="gemini-2.5-pro">gemini-2.5-pro — chất lượng cao, quota free thấp</option>
+        <option value="gemini-flash-latest">gemini-flash-latest — luôn trỏ bản flash mới nhất</option>
+      </select>
+      <span class="field__hint">Nếu gặp lỗi 404 model, hãy chọn model khác trong danh sách.</span>
+    </label>
+
+    <label class="field">
+      <span class="field__label">
+        Độ sáng tạo <output id="tempOut">0.4</output>
+      </span>
+      <input id="temperature" type="range" min="0" max="1" step="0.1" value="0.4" />
+      <span class="field__hint">Thấp = bám sát ý gốc. Cao = diễn đạt lại thoáng hơn.</span>
+    </label>
+
+    <label class="field">
+      <span class="field__label">Hướng dẫn bổ sung (tuỳ chọn)</span>
+      <textarea id="extraInstruction" rows="3"
+        placeholder="VD: Luôn viết prompt bằng tiếng Anh. Luôn thêm mục 'Ràng buộc'."></textarea>
+    </label>
+
+    <div class="actions">
+      <button id="save" class="btn-primary" type="button">Lưu cấu hình</button>
+      <button id="test" class="btn-secondary" type="button">Kiểm tra kết nối</button>
+    </div>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </main>
+
+  <footer class="foot">
+    Dùng trên <b>aistudio.google.com</b>: bấm nút <b>✨ Rewrite</b> cạnh nút Run,
+    hoặc phím tắt <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd>.
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

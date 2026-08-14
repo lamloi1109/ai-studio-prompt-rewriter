@@ -1,0 +1,121 @@
+/* content.css — style cho nút chèn vào AI Studio và toast trạng thái.
+   Mọi selector đều mang tiền tố .ps- và dùng !important ở các thuộc tính
+   dễ bị CSS của AI Studio ghi đè (button reset của Angular Material). */
+
+.ps-rewrite-btn {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  margin-right: 8px;
+  border: none !important;
+  border-radius: 18px;
+  font: 500 13px/1 'Google Sans', Roboto, system-ui, sans-serif;
+  color: #fff !important;
+  background: linear-gradient(95deg, #7c4dff 0%, #4285f4 55%, #1a73e8 100%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .28);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
+}
+
+.ps-rewrite-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: 0 3px 10px rgba(66, 133, 244, .45);
+}
+
+.ps-rewrite-btn:active:not(:disabled) { transform: scale(.97); }
+
+.ps-rewrite-btn:disabled,
+.ps-rewrite-btn--busy {
+  opacity: .65;
+  cursor: progress;
+}
+
+.ps-rewrite-btn--busy .ps-icon {
+  animation: ps-pulse 1s ease-in-out infinite;
+}
+
+/* Vị trí dự phòng khi không tìm thấy thanh công cụ của AI Studio */
+.ps-rewrite-btn--floating {
+  position: fixed !important;
+  right: 24px;
+  bottom: 92px;
+  z-index: 2147483000;
+  margin-right: 0;
+}
+
+@keyframes ps-pulse {
+  0%, 100% { opacity: 1;  transform: scale(1); }
+  50%      { opacity: .4; transform: scale(.85); }
+}
+
+/* ----------------------------- Toast ----------------------------------- */
+
+.ps-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 2147483001;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(560px, 90vw);
+  padding: 11px 16px;
+  border-radius: 10px;
+  border-left: 4px solid #4285f4;
+  font: 400 13.5px/1.45 'Google Sans', Roboto, system-ui, sans-serif;
+  color: #e8eaed;
+  background: #22242a;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .4);
+  opacity: 0;
+  transform: translate(-50%, 14px);
+  pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease;
+}
+
+.ps-toast--show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
+}
+
+.ps-toast--success { border-left-color: #34a853; }
+.ps-toast--error   { border-left-color: #ea4335; }
+.ps-toast--loading { border-left-color: #fbbc04; }
+
+.ps-toast__undo {
+  margin-left: 4px;
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: 6px;
+  background: transparent;
+  color: #8ab4f8;
+  font: 500 12.5px/1 inherit;
+  cursor: pointer;
+}
+
+.ps-toast__undo:hover { background: rgba(138, 180, 248, .14); }
+
+.ps-spinner {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(255, 255, 255, .25);
+  border-top-color: #8ab4f8;
+  border-radius: 50%;
+  animation: ps-spin .7s linear infinite;
+}
+
+@keyframes ps-spin { to { transform: rotate(360deg); } }
+
+/* Trang sáng của AI Studio */
+@media (prefers-color-scheme: light) {
+  .ps-toast {
+    color: #202124;
+    background: #fff;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, .18);
+  }
+  .ps-toast__undo { color: #1a73e8; border-color: rgba(0, 0, 0, .18); }
+}
