@@ -2,6 +2,22 @@
 
 Chrome Extension (Manifest V3) viết lại / tối ưu prompt thô bằng Gemini API — hoạt động trên **mọi trang web**, không chỉ Google AI Studio.
 
+## Demo
+
+<!-- ─────────────────────────────────────────────────────────────────────────
+     CHƯA CÓ FILE DEMO. Sau khi quay xong (hướng dẫn: docs/DEMO.md):
+
+     1. GIF  — commit docs/demo.gif vào repo, rồi bỏ comment dòng dưới đây:
+
+![Demo: viết lại prompt bằng một cú click](docs/demo.gif)
+
+     2. MP4 — KHÔNG commit vào repo (nhúng bằng ![]() sẽ không phát).
+        Mở README.md trên github.com → Edit → kéo-thả demo.mp4 vào ô soạn thảo
+        → GitHub tự sinh URL user-attachments → để URL trần trên dòng riêng.
+     ───────────────────────────────────────────────────────────────────────── -->
+
+> 🎬 Video demo đang được chuẩn bị — xem [docs/DEMO.md](docs/DEMO.md) cho quy trình quay.
+
 ## Ba cách dùng
 
 | Cách | Khi nào tiện |
