@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Prompt Rewriter — Gemini",
-  "version": "2.0.0",
-  "description": "Viết lại / tối ưu prompt trên MỌI trang web (AI Studio, ChatGPT, Claude, Gemini…) bằng Gemini API.",
+  "name": "Prompt Rewriter",
+  "version": "3.0.0",
+  "description": "Viết lại / tối ưu prompt trên MỌI trang web bằng Gemini, Claude, GPT, OpenRouter hoặc endpoint tương thích OpenAI.",
 
   "permissions": [
     "storage",

@@ -5,7 +5,7 @@
 **Biến prompt thô thành prompt chuyên nghiệp — ngay tại ô nhập liệu, trên mọi trang web.**
 
 [![Manifest V3](https://img.shields.io/badge/Manifest-V3-4285F4?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/develop/migrate)
-[![Gemini API](https://img.shields.io/badge/Gemini-API-8E75B2?logo=googlegemini&logoColor=white)](https://ai.google.dev/)
+[![Providers](https://img.shields.io/badge/providers-Gemini_·_Claude_·_GPT_·_OpenRouter-8E75B2)](#nhà-cung-cấp-ai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-34A853)](LICENSE)
 ![Build](https://img.shields.io/badge/build-không_cần-lightgrey)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
@@ -39,6 +39,7 @@ Không copy-paste qua lại. Không mở thêm tab. Không rời khỏi ô nhậ
 ## Tính năng
 
 - **Chạy ở mọi nơi** — mọi `textarea`, `contenteditable` và ô `input` text trên bất kỳ trang web nào
+- **Nhà cung cấp AI tự chọn** — Gemini, Claude, GPT, OpenRouter, hoặc bất kỳ endpoint tương thích OpenAI
 - **Ba cách kích hoạt** — nút nổi, phím tắt, menu chuột phải
 - **Viết lại một phần** — bôi đen một câu, chỉ câu đó thay đổi
 - **Hoàn tác một chạm** — nội dung gốc luôn khôi phục được
@@ -89,15 +90,33 @@ Nút gắn thẳng cạnh nút Send/Run, selector ô nhập nhắm chính xác:
 
 Mọi trang khác dùng cơ chế dò tổng quát — vẫn hoạt động, chỉ là nút ở chế độ nổi thay vì gắn liền.
 
+## Nhà cung cấp AI
+
+Chọn trong popup. **Key và model được lưu riêng cho từng nhà cung cấp**, nên bạn có thể nhập sẵn nhiều key rồi chuyển qua lại mà không mất cấu hình.
+
+| Nhà cung cấp | Lấy key tại | Gợi ý model rẻ / nhanh |
+|---|---|---|
+| **Google Gemini** | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | `gemini-2.5-flash` |
+| **Anthropic Claude** | [platform.claude.com](https://platform.claude.com/settings/keys) | `claude-haiku-4-5` |
+| **OpenAI** | [platform.openai.com](https://platform.openai.com/api-keys) | `gpt-5-mini` |
+| **OpenRouter** | [openrouter.ai/keys](https://openrouter.ai/keys) | `google/gemini-2.5-flash` |
+| **Khác (tương thích OpenAI)** | tuỳ dịch vụ | nhập Base URL + tên model |
+
+Mục **Khác** dùng được với Groq, Together, DeepSeek, Mistral, và cả model chạy máy bạn qua **Ollama** (`http://localhost:11434/v1`) hay **LM Studio** (`http://localhost:1234/v1`) — trường hợp local thì để trống API key.
+
+Ô model là **ô nhập tự do có gợi ý**, không phải danh sách khoá cứng: tên model đổi liên tục nên bạn luôn gõ được tên mới mà không cần chờ extension cập nhật.
+
 ## Cấu hình
 
 Mở popup extension (hoặc `chrome://extensions` → *Details* → *Extension options*):
 
 | Mục | Mô tả |
 |---|---|
-| **API Key** | Chấp nhận cả format cũ `AIza…` lẫn format mới `AQ.Ab8…` |
-| **Model** | Mặc định `gemini-2.5-flash`. Gặp lỗi 404 thì đổi model khác trong danh sách |
-| **Độ sáng tạo** | `0.0` bám sát ý gốc → `1.0` diễn đạt lại thoáng hơn. Mặc định `0.4` |
+| **Nhà cung cấp** | Xem bảng ở trên |
+| **API Key** | Lưu riêng theo nhà cung cấp, chỉ nằm trong `chrome.storage.local` |
+| **Base URL** | Chỉ hiện khi chọn *Khác*. Thường kết thúc bằng `/v1` |
+| **Model** | Gõ tự do hoặc chọn từ gợi ý. Lỗi 404 nghĩa là tên model sai |
+| **Độ sáng tạo** | `0.0` bám sát ý gốc → `1.0` thoáng hơn. Model không nhận tham số này sẽ được tự động bỏ qua |
 | **Hướng dẫn bổ sung** | Nối vào system instruction. VD: *"luôn viết prompt bằng tiếng Anh"* |
 | **Hiện nút ✨** | Tắt đi thì chỉ còn phím tắt + chuột phải, trang web hoàn toàn sạch |
 | **Blocklist** | Tắt hẳn extension theo tên miền. Áp dụng cả tên miền con, có hiệu lực ngay |
@@ -109,7 +128,8 @@ Mở popup extension (hoặc `chrome://extensions` → *Details* → *Extension 
 ```
 rewrite_prompt/
 ├── manifest.json      # MV3: permissions, content script, shortcut, context menu
-├── background.js      # Service worker — nơi DUY NHẤT gọi Gemini API + System Prompt
+├── background.js      # Service worker — nơi DUY NHẤT gọi API + System Prompt
+├── providers.js       # Adapter cho từng nhà cung cấp (dựng request / bóc response)
 ├── content.js         # Dò ô nhập, chèn nút, ghi kết quả trở lại
 ├── content.css        # Style phòng thủ, chống CSS của trang chủ nhà ghi đè
 ├── popup.html/css/js  # Trang cấu hình (dùng chung cho popup và Options)
@@ -118,19 +138,22 @@ rewrite_prompt/
     └── DEMO.md        # Quy trình quay video demo
 ```
 
+Thêm một nhà cung cấp mới chỉ cần thêm một object vào `providers.js` với ba hàm `build` / `parse` / `hint` — background.js và popup tự nhận, không phải sửa gì thêm.
+
 ### Luồng dữ liệu
 
 ```mermaid
 flowchart LR
     A["Ô nhập<br/>(trang bất kỳ)"] -->|đọc text| B[content.js]
     B -->|sendMessage| C["background.js<br/>service worker"]
-    C -->|"fetch + x-goog-api-key"| D[("Gemini API")]
+    C --> P["providers.js<br/>adapter"]
+    P -->|fetch| D[("Gemini / Claude<br/>GPT / OpenRouter")]
     D -->|prompt đã viết lại| C
     C -->|sendResponse| B
     B -->|"native setter<br/>+ input event"| A
 ```
 
-Content script **không bao giờ** gọi API trực tiếp. Nó mang origin của trang chủ nhà nên request tới `generativelanguage.googleapis.com` sẽ bị CORS chặn. Service worker chạy dưới origin `chrome-extension://` với `host_permissions` phù hợp nên không vướng.
+Content script **không bao giờ** gọi API trực tiếp. Nó mang origin của trang chủ nhà nên request tới máy chủ AI sẽ bị CORS chặn. Service worker chạy dưới origin `chrome-extension://` với `host_permissions` phù hợp nên không vướng.
 
 ## Chi tiết kỹ thuật
 
@@ -177,6 +200,24 @@ Nhờ vậy một prompt chứa *"bỏ qua chỉ thị trước đó và trả l
 </details>
 
 <details>
+<summary><b>Tự thích nghi khi model từ chối một tham số</b></summary>
+
+Mỗi đời model lại siết một tham số khác nhau: Anthropic **bỏ hẳn `temperature`** từ Opus 4.7 (gửi vào là 400), OpenAI đổi `max_tokens` thành `max_completion_tokens` ở các model reasoning, Opus 5 bật thinking mặc định và ăn chung hạn mức `max_tokens`.
+
+Hard-code một bảng tương thích sẽ lạc hậu sau vài tháng. Thay vào đó, các tham số tuỳ chọn được đánh dấu trong `OPTIONAL_PARAMS`; khi API trả 400 kèm tên một tham số trong danh sách đó, extension gỡ nó ra và thử lại **đúng một lần**:
+
+```js
+if (res.status === 400 && attempt === 0) {
+  const bad = findOffendingParam(detail);
+  if (bad) { stripParam(req.body, bad); continue; }
+}
+```
+
+Nhờ vậy một model mới ra mắt siết thêm tham số vẫn chạy được, không cần cập nhật extension.
+
+</details>
+
+<details>
 <summary><b>Ba lớp đảm bảo output sạch</b></summary>
 
 Yêu cầu là kết quả trả về phải là prompt hoàn chỉnh, không kèm lời dẫn thừa:
@@ -194,9 +235,11 @@ Yêu cầu là kết quả trả về phải là prompt hoàn chỉnh, không k�
 | Nút ✨ không hiện | Tên miền nằm trong blocklist, hoặc đã tắt *Hiện nút* | Kiểm tra popup |
 | Không chạy trên `chrome://`, Chrome Web Store | Giới hạn cứng của Chrome | Không khắc phục được |
 | *"Tiện ích vừa được tải lại"* | Bạn vừa reload extension, content script cũ mất context | `F5` lại trang |
-| *"API key bị từ chối (403)"* | Key sai, đã xoá, hoặc chưa bật Generative Language API | Tạo key mới |
-| *"Không tìm thấy model (404)"* | Model không khả dụng với key của bạn | Chọn model khác trong popup |
-| *"Vượt hạn mức (429)"* | Chạm quota free tier | Đợi ~1 phút, hoặc đổi sang `gemini-2.5-flash-lite` |
+| *"API key … bị từ chối (401/403)"* | Key sai, đã xoá, hoặc thiếu quyền | Tạo key mới ở đúng nhà cung cấp đang chọn |
+| *"Không tìm thấy model (404)"* | Tên model sai hoặc key chưa được cấp quyền | Gõ tên model khác. OpenRouter phải đúng dạng `nhà-cung-cấp/tên-model` |
+| *"Vượt hạn mức (429)"* | Chạm quota | Đợi ~1 phút, hoặc đổi model rẻ hơn |
+| *"Hết credit (402)"* | Tài khoản trả phí hết tiền | Nạp credit, hoặc chuyển sang nhà cung cấp có free tier |
+| *"Claude từ chối yêu cầu"* | Bộ lọc an toàn của Anthropic | Đổi model hoặc sửa nội dung prompt |
 | Text được chèn nhưng nút Send vẫn xám | Framework của trang không nhận sự kiện | [Mở issue](../../issues) kèm tên trang |
 | Nút đè lên UI của trang | Va chạm layout | Tắt *Hiện nút*, dùng phím tắt |
 
@@ -205,9 +248,9 @@ Yêu cầu là kết quả trả về phải là prompt hoàn chỉnh, không k�
 ## Quyền riêng tư
 
 - **API key** chỉ nằm trong `chrome.storage.local` — không đồng bộ, không rời khỏi máy bạn
-- Key gửi qua header `x-goog-api-key`, **không** đưa vào query string để tránh lọt vào log
-- Extension **không** thu thập, không gửi telemetry, không có máy chủ trung gian
-- ⚠️ **Nội dung ô nhập được gửi tới Google Gemini API để xử lý.** Đừng dùng trên thông tin nhạy cảm. Dùng blocklist để tắt ở các trang như webmail hay hệ thống nội bộ
+- Key luôn gửi qua **header** (`x-goog-api-key` / `x-api-key` / `Authorization`), **không** đưa vào query string để tránh lọt vào log
+- Extension **không** thu thập, không gửi telemetry, không có máy chủ trung gian — request đi thẳng từ máy bạn tới nhà cung cấp bạn chọn
+- ⚠️ **Nội dung ô nhập được gửi tới nhà cung cấp AI bạn đang chọn.** Đừng dùng trên thông tin nhạy cảm. Dùng blocklist để tắt ở các trang như webmail hay hệ thống nội bộ. Muốn dữ liệu không rời khỏi máy, chọn *Khác* và trỏ tới Ollama/LM Studio chạy local
 
 Extension xin quyền `<all_urls>` nên Chrome cảnh báo *"Read and change all your data on all websites"* — đây là hệ quả bắt buộc của việc chạy trên mọi trang. Muốn thu hẹp, sửa `matches` trong `manifest.json` thành danh sách domain cụ thể.
 
